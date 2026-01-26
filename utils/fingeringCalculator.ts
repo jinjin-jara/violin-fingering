@@ -1,40 +1,33 @@
 /**
- * 바이올린 운지 계산 유틸리티
- * 
- * 음표를 바이올린 지판 위치(현, 포지션, 손가락)로 변환합니다.
+ * 바이올린 운지 계산 유틸리티 (이미지 운지표 기준, 1st position)
+ *
+ * - 각 현에서 개방현(open=0)부터 완전5도(+7 semitones)까지를 1포지션 범위로 보고,
+ * - 반음 위치에 따라 low/high finger 패턴을 적용합니다.
+ *
+ * 이미지 기준 패턴:
+ * - E/A/D 현: 1(저/고), 2(저/고), 3(저), 4(저/고)  → +6, +7은 4번
+ * - G 현:     1(저/고), 2(저/고), 3(저/고)        → +5, +6은 3번, +7은 4번
  */
 
-import { Note, Fingering, ViolinString, Position, FingerNumber, KeyInfo } from "@/types/music";
+import {
+  Note,
+  Fingering,
+  ViolinString,
+  Position,
+  FingerNumber,
+  KeyInfo,
+} from "@/types/music";
 import { getActualNote, normalizeNoteName } from "./keyDetection";
 
-/**
- * 바이올린 현별 개방현 음
- */
-const OPEN_STRINGS: Record<ViolinString, string> = {
-  E: "E5",
-  A: "A4",
-  D: "D4",
-  G: "G3",
+/** 개방현(절대 음표) */
+const OPEN_STRINGS: Record<ViolinString, { note: string; octave: number }> = {
+  E: { note: "E", octave: 5 },
+  A: { note: "A", octave: 4 },
+  D: { note: "D", octave: 4 },
+  G: { note: "G", octave: 3 },
 };
 
-/**
- * 포지션별 손가락 간격 (반음 단위)
- * Half Position: 반음 아래
- * 1st Position: 개방현 기준 1음 위
- * 2nd Position: 개방현 기준 2음 위
- * 3rd Position: 개방현 기준 3음 위
- */
-const POSITION_OFFSETS: Record<Position, number> = {
-  half: -0.5,
-  "1st": 1,
-  "2nd": 2,
-  "3rd": 3,
-  "4th": 4,
-};
-
-/**
- * 음표 이름을 반음 단위로 변환 (C = 0, C# = 1, D = 2, ...)
- */
+/** C=0 ~ B=11 */
 function noteToSemitones(noteName: string): number {
   const baseNotes: Record<string, number> = {
     C: 0,
@@ -50,134 +43,101 @@ function noteToSemitones(noteName: string): number {
     "A#": 10,
     B: 11,
   };
-
   return baseNotes[normalizeNoteName(noteName)] ?? 0;
 }
 
-/**
- * 반음 단위를 음표 이름으로 변환
- */
-function semitonesToNote(semitones: number): string {
-  const notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-  return notes[semitones % 12];
-}
-
-/**
- * 옥타브를 고려한 절대 반음 수 계산
- */
 function getAbsoluteSemitones(noteName: string, octave: number): number {
-  const semitones = noteToSemitones(noteName);
-  return octave * 12 + semitones;
+  return octave * 12 + noteToSemitones(noteName);
 }
 
-/**
- * 개방현 음의 절대 반음 수
- */
 function getOpenStringSemitones(string: ViolinString): number {
-  const [note, octave] = OPEN_STRINGS[string].split(/(\d+)/);
-  return getAbsoluteSemitones(note, parseInt(octave));
+  const os = OPEN_STRINGS[string];
+  return getAbsoluteSemitones(os.note, os.octave);
 }
 
 /**
- * 특정 현에서 특정 음을 연주할 수 있는지 확인
- * @param targetSemitones 목표 음의 절대 반음 수
- * @param string 현
- * @param maxPosition 최대 포지션 (기본 3rd)
+ * 이미지 운지표 기준: 1포지션에서의 "반음 오프셋 → 손가락" 매핑
+ * (오프셋은 개방현 대비 반음 수)
+ *
+ * E/A/D:
+ *  0:0
+ *  1:1 (low1)   2:1 (high1)
+ *  3:2 (low2)   4:2 (high2)
+ *  5:3 (3)
+ *  6:4 (low4)   7:4 (high4)
+ *
+ * G:
+ *  0:0
+ *  1:1 (low1)   2:1 (high1)
+ *  3:2 (low2)   4:2 (high2)
+ *  5:3 (low3)   6:3 (high3)
+ *  7:4 (4)
  */
-function canPlayOnString(
-  targetSemitones: number,
-  string: ViolinString,
-  maxPosition: Position = "3rd"
+const FIRST_POSITION_FINGERING_MAP: Record<
+  ViolinString,
+  Record<number, FingerNumber>
+> = {
+  E: { 0: 0, 1: 1, 2: 1, 3: 2, 4: 2, 5: 3, 6: 4, 7: 4 },
+  A: { 0: 0, 1: 1, 2: 1, 3: 2, 4: 2, 5: 3, 6: 4, 7: 4 },
+  D: { 0: 0, 1: 1, 2: 1, 3: 2, 4: 2, 5: 3, 6: 4, 7: 4 },
+  G: { 0: 0, 1: 1, 2: 1, 3: 2, 4: 2, 5: 3, 6: 3, 7: 4 },
+};
+
+/** 1포지션 범위 체크: open(0) ~ 완전5도(+7) */
+function canPlayInFirstPosition(
+  targetAbs: number,
+  string: ViolinString
 ): boolean {
-  const openSemitones = getOpenStringSemitones(string);
-  const maxOffset = POSITION_OFFSETS[maxPosition] + 4; // 손가락 4번까지
-  const maxSemitones = openSemitones + maxOffset;
-
-  return targetSemitones >= openSemitones && targetSemitones <= maxSemitones;
+  const openAbs = getOpenStringSemitones(string);
+  const offset = targetAbs - openAbs;
+  return offset >= 0 && offset <= 7;
 }
 
-/**
- * 특정 현에서 음을 연주하기 위한 포지션과 손가락 계산
- */
-function calculateFingeringOnString(
-  targetSemitones: number,
+/** 특정 현에서 1포지션 운지 계산 (이미지 기준) */
+function calculateFirstPositionOnString(
+  targetAbs: number,
   string: ViolinString
 ): { position: Position; finger: FingerNumber } | null {
-  const openSemitones = getOpenStringSemitones(string);
-  const semitoneOffset = targetSemitones - openSemitones;
+  const openAbs = getOpenStringSemitones(string);
+  const offset = targetAbs - openAbs;
 
-  if (semitoneOffset < 0) {
-    return null; // 개방현보다 낮은 음은 연주 불가
-  }
+  if (offset < 0 || offset > 7) return null;
 
-  // 개방현
-  if (semitoneOffset === 0) {
-    return { position: "1st", finger: 0 };
-  }
+  const finger = FIRST_POSITION_FINGERING_MAP[string][offset];
+  if (finger === undefined) return null;
 
-  // 포지션별로 확인
-  const positions: Position[] = ["half", "1st", "2nd", "3rd", "4th"];
-  
-  for (const position of positions) {
-    const positionOffset = POSITION_OFFSETS[position];
-    
-    // 각 손가락 (1-4) 확인
-    for (let finger = 1; finger <= 4; finger++) {
-      const totalOffset = positionOffset + finger;
-      if (Math.abs(totalOffset - semitoneOffset) < 0.1) {
-        return { position, finger: finger as FingerNumber };
-      }
-    }
-  }
-
-  return null;
+  return { position: "1st", finger };
 }
 
 /**
- * 음표에 대한 최적의 운지 계산
- * 여러 현에서 연주 가능한 경우, 가장 편한 위치를 선택합니다.
+ * 음표에 대한 최적 운지 계산
+ * - 여러 현에서 가능하면 "낮은 현 우선(G→D→A→E)"을 기본으로 선택
+ *   (기존 코드의 정책과 일치)
  */
 export function calculateFingering(
   note: Note,
   keyInfo: KeyInfo
 ): Fingering | null {
-  // 조성에 따른 실제 음 계산
   const actualNoteName = getActualNote(note.name, keyInfo);
-  const normalizedNote = normalizeNoteName(actualNoteName);
-  const targetSemitones = getAbsoluteSemitones(normalizedNote, note.octave);
+  const normalized = normalizeNoteName(actualNoteName);
+  const targetAbs = getAbsoluteSemitones(normalized, note.octave);
 
-  // 각 현에서 연주 가능한지 확인
-  const strings: ViolinString[] = ["E", "A", "D", "G"];
-  const candidates: Array<{ string: ViolinString; position: Position; finger: FingerNumber }> = [];
+  const stringsByPreference: ViolinString[] = ["G", "D", "A", "E"];
+  const candidates: Array<{
+    string: ViolinString;
+    position: Position;
+    finger: FingerNumber;
+  }> = [];
 
-  for (const string of strings) {
-    const fingering = calculateFingeringOnString(targetSemitones, string);
-    if (fingering) {
-      candidates.push({
-        string,
-        ...fingering,
-      });
-    }
+  for (const string of stringsByPreference) {
+    if (!canPlayInFirstPosition(targetAbs, string)) continue;
+    const fingering = calculateFirstPositionOnString(targetAbs, string);
+    if (fingering) candidates.push({ string, ...fingering });
   }
 
-  if (candidates.length === 0) {
-    return null;
-  }
+  if (candidates.length === 0) return null;
 
-  // 최적의 운지 선택 (우선순위: 낮은 현 > 낮은 포지션 > 낮은 손가락)
-  candidates.sort((a, b) => {
-    const stringOrder: Record<ViolinString, number> = { G: 0, D: 1, A: 2, E: 3 };
-    const positionOrder: Record<Position, number> = { half: 0, "1st": 1, "2nd": 2, "3rd": 3, "4th": 4 };
-    
-    if (stringOrder[a.string] !== stringOrder[b.string]) {
-      return stringOrder[a.string] - stringOrder[b.string];
-    }
-    if (positionOrder[a.position] !== positionOrder[b.position]) {
-      return positionOrder[a.position] - positionOrder[b.position];
-    }
-    return a.finger - b.finger;
-  });
-
+  // 이미 G→D→A→E 순으로 넣었으니 첫 후보가 기본 최적
   const best = candidates[0];
 
   return {
@@ -186,19 +146,16 @@ export function calculateFingering(
     position: best.position,
     note: {
       ...note,
-      name: normalizedNote as any,
+      name: normalized as any,
     },
   };
 }
 
-/**
- * 여러 음표에 대한 운지 계산
- */
 export function calculateFingerings(
   notes: Note[],
   keyInfo: KeyInfo
 ): Fingering[] {
   return notes
-    .map((note) => calculateFingering(note, keyInfo))
-    .filter((fingering): fingering is Fingering => fingering !== null);
+    .map((n) => calculateFingering(n, keyInfo))
+    .filter((x): x is Fingering => x !== null);
 }

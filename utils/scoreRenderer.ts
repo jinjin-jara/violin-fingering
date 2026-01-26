@@ -24,6 +24,14 @@ export interface RenderOptions {
   borderColor?: string;
   /** 배경 원 테두리 두께 (기본: 2) */
   borderWidth?: number;
+  /** 운지 번호를 음표 위에도 표시할지 여부 (기본: true) */
+  showAbove?: boolean;
+  /** 운지 번호를 음표 아래에도 표시할지 여부 (기본: true) */
+  showBelow?: boolean;
+  /** X 좌표 오프셋 (음표 머리 중심 정렬 보정, 기본: 0) */
+  offsetX?: number;
+  /** Y 좌표 오프셋 (음표 수직 정렬 보정, 기본: 0) */
+  offsetYBase?: number;
 }
 
 const DEFAULT_OPTIONS: Required<RenderOptions> = {
@@ -35,6 +43,10 @@ const DEFAULT_OPTIONS: Required<RenderOptions> = {
   backgroundColor: "#ffffff",
   borderColor: "#1f2937",
   borderWidth: 2,
+  showAbove: true,
+  showBelow: true,
+  offsetX: 0,
+  offsetYBase: 0,
 };
 
 /**
@@ -45,14 +57,15 @@ const DEFAULT_OPTIONS: Required<RenderOptions> = {
 function drawFingeringNumber(
   ctx: CanvasRenderingContext2D,
   fingering: Fingering,
+  y: number,
   options: Required<RenderOptions>
 ): void {
   const { note, finger } = fingering;
-  const { fontSize, offsetY, circleRadius, textColor, backgroundColor, borderColor, borderWidth, scale } = options;
+  const { fontSize, circleRadius, textColor, backgroundColor, borderColor, borderWidth, offsetX } = options;
 
   // 원본 좌표 (스케일된 context이므로 자동으로 스케일 적용됨)
-  const x = note.x;
-  const y = note.y + offsetY;
+  // X 좌표 오프셋은 이미 renderScoreWithFingerings에서 적용됨
+  const x = note.x + offsetX;
 
   // 배경 원 그리기 (원본 크기 사용, context 스케일에 의해 자동 확대)
   ctx.beginPath();
@@ -64,11 +77,14 @@ function drawFingeringNumber(
   ctx.stroke();
 
   // 숫자 그리기 (원본 폰트 크기 사용, context 스케일에 의해 자동 확대)
+  // 이미지 표시 시 내부 계산값에서 1을 빼서 표시 (개방현 0도 표시)
+  const displayNumber = finger > 0 ? finger - 1 : 0;
+  
   ctx.fillStyle = textColor;
   ctx.font = `bold ${fontSize}px Arial, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(finger.toString(), x, y);
+  ctx.fillText(displayNumber.toString(), x, y);
 }
 
 /**
@@ -111,21 +127,31 @@ export function renderScoreWithFingerings(
   // 운지 숫자 오버레이 (스케일된 context에서 원본 좌표 사용)
   analysis.fingerings.forEach((fingering) => {
     // 원본 좌표 (스케일된 context이므로 원본 좌표 그대로 사용)
-    const x = fingering.note.x;
-    const y = fingering.note.y + opts.offsetY;
+    // X 좌표 오프셋 적용
+    const x = fingering.note.x + opts.offsetX;
+    // Y 좌표 기본 오프셋 적용 (음표 y 좌표 자체를 보정)
+    const noteY = fingering.note.y + opts.offsetYBase;
     
     // 좌표 유효성 검사 (원본 좌표 기준)
-    if (
-      x < 0 ||
-      x > displayWidth ||
-      y < 0 ||
-      y > displayHeight
-    ) {
+    if (x < 0 || x > displayWidth) {
       return; // 화면 밖이면 스킵
     }
 
-    // 스케일된 상태에서 숫자 그리기
-    drawFingeringNumber(ctx, fingering, opts);
+    // 음표 위에 운지 번호 표시
+    if (opts.showAbove) {
+      const yAbove = noteY - opts.offsetY;
+      if (yAbove >= 0 && yAbove <= displayHeight) {
+        drawFingeringNumber(ctx, fingering, yAbove, opts);
+      }
+    }
+
+    // 음표 아래에 운지 번호 표시
+    if (opts.showBelow) {
+      const yBelow = noteY + opts.offsetY;
+      if (yBelow >= 0 && yBelow <= displayHeight) {
+        drawFingeringNumber(ctx, fingering, yBelow, opts);
+      }
+    }
   });
 }
 

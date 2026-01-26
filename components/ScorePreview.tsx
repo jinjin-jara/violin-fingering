@@ -44,6 +44,8 @@ export default function ScorePreview({
             scale,
             fontSize: 20,
             offsetY: 35, // 음표 아래에 배치
+            offsetX: 15, // X 좌표 보정 (음표 머리 중심 정렬)
+            offsetYBase: 0, // Y 좌표 기본 보정 (음표 수직 정렬)
             circleRadius: 16,
             textColor: "#1f2937", // 진한 회색 (가독성 향상)
             backgroundColor: "#ffffff",
@@ -98,6 +100,8 @@ export default function ScorePreview({
             scale,
             fontSize: 20,
             offsetY: 35, // 음표 아래에 배치
+            offsetX: 15, // X 좌표 보정 (음표 머리 중심 정렬)
+            offsetYBase: 0, // Y 좌표 기본 보정 (음표 수직 정렬)
             circleRadius: 16,
             textColor: "#1f2937", // 진한 회색 (가독성 향상)
             backgroundColor: "#ffffff",
