@@ -96,12 +96,31 @@ export default async function handler(
     addLog(`음표 추출 완료: ${parsedData.notes.length}개`);
     addLog(`조성: ${parsedData.keyInfo?.key || "Unknown"} ${parsedData.keyInfo?.mode || "major"}`);
 
-    // 3. 음표 좌표 추출 (원본 이미지 기반)
-    addLog("음표 좌표 추출 중...");
+    // 3. 음표 좌표 추출 (MusicXML에서 이미 추출됨, 추가 보정만 수행)
+    addLog("음표 좌표 확인 중...");
+    
+    // 디버깅: 모든 음표 좌표 출력
+    console.log("=".repeat(80));
+    console.log("📊 음표 좌표 정보 (Audiveris에서 추출)");
+    console.log("=".repeat(80));
+    parsedData.notes.forEach((note, index) => {
+      console.log(`${index + 1}. ${note.name}${note.octave} | X: ${note.x.toFixed(1)}px | Y: ${note.y.toFixed(1)}px`);
+    });
+    console.log("=".repeat(80));
+    
     const notesWithCoordinates = await extractNoteCoordinates(
       parsedData.notes,
       omrResult.imagePath || fileData
     );
+
+    // 최종 좌표 확인
+    console.log("=".repeat(80));
+    console.log("📊 최종 음표 좌표 (렌더링용)");
+    console.log("=".repeat(80));
+    notesWithCoordinates.forEach((note, index) => {
+      console.log(`${index + 1}. ${note.name}${note.octave} | X: ${note.x.toFixed(1)}px | Y: ${note.y.toFixed(1)}px`);
+    });
+    console.log("=".repeat(80));
 
     if (notesWithCoordinates.length === 0) {
       addLog("경고: 좌표 추출 실패, 기본 좌표 사용");

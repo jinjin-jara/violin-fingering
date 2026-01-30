@@ -43,14 +43,16 @@ export default function ScorePreview({
           renderScoreWithFingerings(img, analysis, canvas, {
             scale,
             fontSize: 20,
-            offsetY: 35, // 음표 아래에 배치
-            offsetX: 15, // X 좌표 보정 (음표 머리 중심 정렬)
-            offsetYBase: 0, // Y 좌표 기본 보정 (음표 수직 정렬)
+            offsetY: 25, // 음표 위 거리
+            offsetX: 10, // X 좌표 보정 (음표 머리 중심으로 이동)
+            offsetYBase: -50, // Y 좌표 기본 보정 (위로 이동하여 음표에 맞춤)
             circleRadius: 16,
             textColor: "#1f2937", // 진한 회색 (가독성 향상)
             backgroundColor: "#ffffff",
             borderColor: "#1f2937",
             borderWidth: 2,
+            showAbove: true, // 위에만 표시 (중복 방지)
+            showBelow: false, // 아래는 표시 안 함
           });
 
           // CSS로 표시할 크기 설정 (고해상도 Canvas를 원본 크기로 표시)
@@ -99,14 +101,16 @@ export default function ScorePreview({
           renderScoreWithFingerings(img, analysis, canvas, {
             scale,
             fontSize: 20,
-            offsetY: 35, // 음표 아래에 배치
-            offsetX: 15, // X 좌표 보정 (음표 머리 중심 정렬)
-            offsetYBase: 0, // Y 좌표 기본 보정 (음표 수직 정렬)
+            offsetY: 25, // 음표 위 거리
+            offsetX: 10, // X 좌표 보정 (음표 머리 중심으로 이동)
+            offsetYBase: -50, // Y 좌표 기본 보정 (위로 이동하여 음표에 맞춤)
             circleRadius: 16,
             textColor: "#1f2937", // 진한 회색 (가독성 향상)
             backgroundColor: "#ffffff",
             borderColor: "#1f2937",
             borderWidth: 2,
+            showAbove: true, // 위에만 표시 (중복 방지)
+            showBelow: false, // 아래는 표시 안 함
           });
 
           // CSS로 표시할 크기 설정 (고해상도 Canvas를 원본 크기로 표시)

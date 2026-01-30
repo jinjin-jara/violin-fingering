@@ -133,10 +133,20 @@ export async function analyzeScore(
   try {
     // OMR API 호출
     const fileData = await file.arrayBuffer();
-    // ArrayBuffer를 Base64로 변환
-    const base64Data = btoa(
-      String.fromCharCode(...new Uint8Array(fileData))
-    );
+
+    // ArrayBuffer를 안전하게 Base64로 변환 (대용량 파일도 지원)
+    function arrayBufferToBase64(buffer: ArrayBuffer): string {
+      let binary = '';
+      const bytes = new Uint8Array(buffer);
+      const chunkSize = 0x8000; // 32KB
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.subarray(i, i + chunkSize);
+        binary += String.fromCharCode.apply(null, Array.from(chunk));
+      }
+      return btoa(binary);
+    }
+
+    const base64Data = arrayBufferToBase64(fileData);
 
     const response = await fetch("/api/omr", {
       method: "POST",
