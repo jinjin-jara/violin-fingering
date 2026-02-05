@@ -1,6 +1,6 @@
 /**
  * OMR (Optical Music Recognition) API 엔드포인트
- * 
+ *
  * 악보 이미지/PDF를 업로드받아 OMR 엔진을 통해 MusicXML을 생성하고,
  * 음표 좌표와 운지 정보를 반환합니다.
  */
@@ -8,7 +8,12 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { processOMR } from "@/utils/omrProcessor";
 import { parseMusicXML } from "@/utils/musicXmlParser";
-import { extractNoteCoordinates } from "@/utils/noteCoordinateExtractor";
+import {
+  extractNoteCoordinates,
+  extractNoteLayoutsFromMusicXML,
+  getImageDimensions,
+  syncNotesFromNoteLayouts,
+} from "@/utils/noteCoordinateExtractor";
 import { calculateFingerings } from "@/utils/fingeringCalculator";
 import { detectKeyFromSignature } from "@/utils/keyDetection";
 import { Note, ScoreAnalysis, KeyInfo } from "@/types/music";
@@ -69,7 +74,7 @@ export default async function handler(
     // 1. OMR 처리 (PDF/Image → MusicXML)
     addLog("OMR 엔진 실행 중...");
     const omrResult = await processOMR(fileData, fileName, fileType);
-    
+
     if (!omrResult.success || !omrResult.musicXml) {
       return res.status(500).json({
         success: false,
@@ -84,8 +89,12 @@ export default async function handler(
     // 2. MusicXML 파싱
     addLog("MusicXML 파싱 중...");
     const parsedData = parseMusicXML(omrResult.musicXml);
-    
-    if (!parsedData.success || !parsedData.notes || parsedData.notes.length === 0) {
+
+    if (
+      !parsedData.success ||
+      !parsedData.notes ||
+      parsedData.notes.length === 0
+    ) {
       return res.status(500).json({
         success: false,
         error: parsedData.error || "MusicXML 파싱 실패 또는 음표가 없습니다",
@@ -94,57 +103,99 @@ export default async function handler(
     }
 
     addLog(`음표 추출 완료: ${parsedData.notes.length}개`);
-    addLog(`조성: ${parsedData.keyInfo?.key || "Unknown"} ${parsedData.keyInfo?.mode || "major"}`);
-
-    // 3. 음표 좌표 추출 (MusicXML에서 이미 추출됨, 추가 보정만 수행)
-    addLog("음표 좌표 확인 중...");
-    
-    // 디버깅: 모든 음표 좌표 출력
-    console.log("=".repeat(80));
-    console.log("📊 음표 좌표 정보 (Audiveris에서 추출)");
-    console.log("=".repeat(80));
-    parsedData.notes.forEach((note, index) => {
-      console.log(`${index + 1}. ${note.name}${note.octave} | X: ${note.x.toFixed(1)}px | Y: ${note.y.toFixed(1)}px`);
-    });
-    console.log("=".repeat(80));
-    
-    const notesWithCoordinates = await extractNoteCoordinates(
-      parsedData.notes,
-      omrResult.imagePath || fileData
+    addLog(
+      `조성: ${parsedData.keyInfo?.key || "Unknown"} ${
+        parsedData.keyInfo?.mode || "major"
+      }`
     );
 
-    // 최종 좌표 확인
-    console.log("=".repeat(80));
-    console.log("📊 최종 음표 좌표 (렌더링용)");
-    console.log("=".repeat(80));
-    notesWithCoordinates.forEach((note, index) => {
-      console.log(`${index + 1}. ${note.name}${note.octave} | X: ${note.x.toFixed(1)}px | Y: ${note.y.toFixed(1)}px`);
-    });
-    console.log("=".repeat(80));
+    // 3. 페이지 기준 절대 좌표 계산 (Audiveris/MusicXML → NoteLayout + pageLayout)
+    addLog("페이지 좌표 계산 중...");
+    let imageSize: { width: number; height: number } | undefined;
+    if (omrResult.imagePath && typeof omrResult.imagePath === "string") {
+      try {
+        imageSize = await getImageDimensions(omrResult.imagePath);
+        addLog(`원본 이미지 크기: ${imageSize.width}x${imageSize.height}`);
+      } catch {
+        addLog("이미지 크기 읽기 생략 (경로 없음 또는 비이미지)");
+      }
+    }
 
-    if (notesWithCoordinates.length === 0) {
-      addLog("경고: 좌표 추출 실패, 기본 좌표 사용");
+    const layoutResult = extractNoteLayoutsFromMusicXML(
+      omrResult.musicXml,
+      imageSize,
+      { violinRangeOnly: false }
+    );
+    const { noteLayouts, pageLayout, measureLayouts } = layoutResult;
+
+    let notesWithCoordinates: Note[];
+    if (
+      noteLayouts.length > 0 &&
+      noteLayouts.length === parsedData.notes!.length &&
+      pageLayout
+    ) {
+      if (imageSize) {
+        notesWithCoordinates = syncNotesFromNoteLayouts(
+          parsedData.notes!,
+          noteLayouts,
+          pageLayout,
+          imageSize
+        );
+        addLog(
+          `페이지 좌표 반영 완료: ${notesWithCoordinates.length}개 (픽셀)`
+        );
+      } else {
+        notesWithCoordinates = await extractNoteCoordinates(
+          parsedData.notes!,
+          omrResult.imagePath || fileData,
+          { musicXml: omrResult.musicXml, violinRangeOnly: false }
+        );
+        addLog(
+          `좌표 보정 완료 (이미지 크기 미제공): ${notesWithCoordinates.length}개`
+        );
+      }
     } else {
-      addLog(`좌표 추출 완료: ${notesWithCoordinates.length}개`);
+      notesWithCoordinates = await extractNoteCoordinates(
+        parsedData.notes!,
+        omrResult.imagePath || fileData,
+        { musicXml: omrResult.musicXml, imageSize, violinRangeOnly: false }
+      );
+      if (notesWithCoordinates.length === 0)
+        addLog("경고: 좌표 추출 실패, 기본 좌표 사용");
+      else addLog(`좌표 추출 완료: ${notesWithCoordinates.length}개`);
     }
 
     // 4. 조성 판별
-    const keyInfo: KeyInfo = parsedData.keyInfo || detectKeyFromSignature(
-      parsedData.keySignature?.sharps || 0,
-      parsedData.keySignature?.flats || 0
-    );
+    const keyInfo: KeyInfo =
+      parsedData.keyInfo ||
+      detectKeyFromSignature(
+        parsedData.keySignature?.sharps || 0,
+        parsedData.keySignature?.flats || 0
+      );
 
     // 5. 운지 계산
     addLog("바이올린 운지 계산 중...");
     const fingerings = calculateFingerings(notesWithCoordinates, keyInfo);
     addLog(`운지 계산 완료: ${fingerings.length}개`);
 
-    // 6. 결과 구성
+    // 6. 결과 구성 (페이지 좌표 NoteLayout + PageLayout 포함)
     const analysis: ScoreAnalysis = {
       keyInfo,
       notes: notesWithCoordinates,
       fingerings,
       timeSignature: parsedData.timeSignature,
+      noteLayouts: noteLayouts.length > 0 ? noteLayouts : undefined,
+      pageLayout: pageLayout
+        ? {
+            pageWidthTenths: pageLayout.pageWidthTenths,
+            pageHeightTenths: pageLayout.pageHeightTenths,
+            tenthsPerMm: pageLayout.tenthsPerMm,
+          }
+        : undefined,
+      measureLayouts:
+        measureLayouts && measureLayouts.length > 0
+          ? measureLayouts
+          : undefined,
     };
 
     addLog("OMR 처리 완료");
@@ -155,9 +206,10 @@ export default async function handler(
       logs,
     });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "알 수 없는 오류";
+    const errorMessage =
+      error instanceof Error ? error.message : "알 수 없는 오류";
     addLog(`오류 발생: ${errorMessage}`);
-    
+
     return res.status(500).json({
       success: false,
       error: errorMessage,

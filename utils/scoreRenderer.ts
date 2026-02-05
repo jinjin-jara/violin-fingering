@@ -1,107 +1,132 @@
 /**
  * 악보 렌더링 유틸리티
  *
- * 원본 악보 이미지에 바이올린 운지 숫자를 오버레이하여
- * 최종 결과 이미지를 생성합니다.
+ * 운지 숫자는 **measure bounding box 기준**으로만 배치합니다.
+ * note.y / staff.y / system 상대 좌표는 사용하지 않습니다.
  */
 
-import { ScoreAnalysis, Fingering } from "@/types/music";
+import {
+  ScoreAnalysis,
+  MeasureLayout,
+  MeasureLabel,
+  Fingering,
+} from "@/types/music";
 
 export interface RenderOptions {
   /** 고해상도 렌더링을 위한 스케일 (기본: 2) */
   scale?: number;
-  /** 운지 숫자 폰트 크기 (기본: 24) */
+  /** 운지 라벨 폰트 크기 (기본: 24) */
   fontSize?: number;
-  /** 음표와 숫자 사이의 오프셋 (기본: 40) */
-  offsetY?: number;
   /** 숫자 배경 원의 반지름 (기본: 18) */
   circleRadius?: number;
-  /** 숫자 색상 (기본: #1f2937 - 진한 회색) */
+  /** 숫자 색상 (기본: #1f2937) */
   textColor?: string;
-  /** 배경 원 색상 (기본: #ffffff - 흰색) */
+  /** 배경 원 색상 (기본: #ffffff) */
   backgroundColor?: string;
   /** 배경 원 테두리 색상 (기본: #1f2937) */
   borderColor?: string;
   /** 배경 원 테두리 두께 (기본: 2) */
   borderWidth?: number;
-  /** 운지 번호를 음표 위에도 표시할지 여부 (기본: true) */
-  showAbove?: boolean;
-  /** 운지 번호를 음표 아래에도 표시할지 여부 (기본: true) */
-  showBelow?: boolean;
-  /** X 좌표 오프셋 (음표 머리 중심 정렬 보정, 기본: 0) */
-  offsetX?: number;
-  /** Y 좌표 오프셋 (음표 수직 정렬 보정, 기본: 0) */
-  offsetYBase?: number;
+  /** 마디 bbox 하단에서 라벨까지의 고정 오프셋 픽셀 (기본: 30) */
+  offsetBelowMeasure?: number;
 }
 
 const DEFAULT_OPTIONS: Required<RenderOptions> = {
   scale: 2,
   fontSize: 24,
-  offsetY: 40,
   circleRadius: 18,
   textColor: "#1f2937",
   backgroundColor: "#ffffff",
   borderColor: "#1f2937",
   borderWidth: 2,
-  showAbove: true,
-  showBelow: true,
-  offsetX: 0,
-  offsetYBase: 0,
+  offsetBelowMeasure: 30,
 };
 
 /**
- * Canvas에 운지 숫자를 그리는 함수
- * 주의: 이 함수는 이미 스케일된 Canvas context에서 호출되므로,
- * 원본 좌표를 그대로 사용하면 자동으로 스케일이 적용됩니다.
+ * analysis에서 MeasureLabel[] 생성.
+ * - fingerings를 noteLayout.measureIndex로 마디별 그룹화
+ * - x = measure bbox 중앙 (pageX + width/2), y = measure bbox 하단 (pageY + height) + offset
+ * - note.y / staff.y / 상대 좌표 미사용
  */
-function drawFingeringNumber(
-  ctx: CanvasRenderingContext2D,
-  fingering: Fingering,
-  y: number,
-  options: Required<RenderOptions>
-): void {
-  const { note, finger } = fingering;
-  const {
-    fontSize,
-    circleRadius,
-    textColor,
-    backgroundColor,
-    borderColor,
-    borderWidth,
-    offsetX,
-  } = options;
+export function buildMeasureLabels(
+  analysis: ScoreAnalysis,
+  displayWidth: number,
+  displayHeight: number,
+  offsetBelowMeasurePx: number
+): MeasureLabel[] {
+  const { measureLayouts, pageLayout, fingerings, noteLayouts } = analysis;
+  if (
+    !measureLayouts?.length ||
+    !pageLayout ||
+    !fingerings?.length ||
+    !noteLayouts?.length
+  )
+    return [];
 
-  // 원본 좌표 (스케일된 context이므로 자동으로 스케일 적용됨)
-  // X 좌표 오프셋은 이미 renderScoreWithFingerings에서 적용됨
-  const x = note.x + offsetX;
+  const scaleX = displayWidth / pageLayout.pageWidthTenths;
+  const scaleY = displayHeight / pageLayout.pageHeightTenths;
 
-  // 배경 원 그리기 (원본 크기 사용, context 스케일에 의해 자동 확대)
-  ctx.beginPath();
-  ctx.arc(x, y, circleRadius, 0, 2 * Math.PI);
-  ctx.fillStyle = backgroundColor;
-  ctx.fill();
-  ctx.strokeStyle = borderColor;
-  ctx.lineWidth = borderWidth;
-  ctx.stroke();
+  const byMeasure = new Map<number, Fingering[]>();
+  for (const f of fingerings) {
+    const layout = f.note.layoutId
+      ? noteLayouts.find((l) => l.id === f.note.layoutId)
+      : null;
+    const measureIndex = layout?.measureIndex ?? 0;
+    if (!byMeasure.has(measureIndex)) byMeasure.set(measureIndex, []);
+    byMeasure.get(measureIndex)!.push(f);
+  }
 
-  // 숫자 그리기 (원본 폰트 크기 사용, context 스케일에 의해 자동 확대)
-  // 이미지 표시 시 내부 계산값에서 1을 빼서 표시 (개방현 0도 표시)
-  const displayNumber = finger > 0 ? finger - 1 : 0;
-
-  ctx.fillStyle = textColor;
-  ctx.font = `bold ${fontSize}px Arial, sans-serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(displayNumber.toString(), x, y);
+  const labels: MeasureLabel[] = [];
+  for (const meas of measureLayouts) {
+    const list = byMeasure.get(meas.measureIndex) ?? [];
+    const digits = list.map((f) => (f.finger > 0 ? f.finger - 1 : 0));
+    const label = digits.join(" ");
+    const renderX = (meas.pageX + meas.width / 2) * scaleX;
+    const renderY = (meas.pageY + meas.height) * scaleY + offsetBelowMeasurePx;
+    labels.push({
+      measureIndex: meas.measureIndex,
+      label,
+      renderX,
+      renderY,
+    });
+  }
+  return labels;
 }
 
 /**
- * 원본 이미지에 운지 숫자를 오버레이하여 Canvas에 렌더링
- *
- * @param image 원본 이미지 (HTMLImageElement 또는 ImageData)
- * @param analysis 악보 분석 결과
- * @param canvas 렌더링할 Canvas 요소
- * @param options 렌더링 옵션
+ * 마디 라벨 한 개 그리기 (measure bbox 기준 좌표만 사용)
+ */
+function drawMeasureLabel(
+  ctx: CanvasRenderingContext2D,
+  label: MeasureLabel,
+  options: Required<RenderOptions>
+): void {
+  const { fontSize, textColor, backgroundColor, borderColor, borderWidth } =
+    options;
+  if (!label.label.trim()) return;
+
+  ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const metrics = ctx.measureText(label.label);
+  const padding = 8;
+  const w = metrics.width + padding * 2;
+  const h = fontSize + padding;
+  const x = label.renderX - w / 2;
+  const y = label.renderY - h / 2;
+
+  ctx.fillStyle = backgroundColor;
+  ctx.strokeStyle = borderColor;
+  ctx.lineWidth = borderWidth;
+  ctx.strokeRect(x, y, w, h);
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = textColor;
+  ctx.fillText(label.label, label.renderX, label.renderY);
+}
+
+/**
+ * 원본 이미지에 운지 숫자를 오버레이하여 Canvas에 렌더링.
+ * 배치는 measure bounding box만 사용 (note.y / staff.y / 상대 좌표 미사용).
  */
 export function renderScoreWithFingerings(
   image: HTMLImageElement | HTMLCanvasElement,
@@ -115,7 +140,6 @@ export function renderScoreWithFingerings(
     throw new Error("Canvas context를 가져올 수 없습니다.");
   }
 
-  // 고해상도를 위한 캔버스 크기 설정
   const displayWidth = image.width;
   const displayHeight = image.height;
   const canvasWidth = displayWidth * opts.scale;
@@ -123,48 +147,33 @@ export function renderScoreWithFingerings(
 
   canvas.width = canvasWidth;
   canvas.height = canvasHeight;
-
-  // 고해상도 렌더링을 위한 스케일링
   ctx.scale(opts.scale, opts.scale);
 
-  // 원본 이미지 그리기
   if (image instanceof HTMLImageElement || image instanceof HTMLCanvasElement) {
     ctx.drawImage(image, 0, 0, displayWidth, displayHeight);
   }
 
-  // 운지 숫자 오버레이 (스케일된 context에서 원본 좌표 사용)
-  analysis.fingerings.forEach((fingering) => {
-    // 원본 좌표 (스케일된 context이므로 원본 좌표 그대로 사용)
-    // X 좌표 오프셋 적용
-    const x = fingering.note.x + opts.offsetX;
-    // Y 좌표 기본 오프셋 적용 (음표 y 좌표 자체를 보정)
-    const noteY = fingering.note.y + opts.offsetYBase;
+  const hasMeasureLayout =
+    analysis.measureLayouts?.length &&
+    analysis.pageLayout &&
+    analysis.noteLayouts?.length;
 
-    // 좌표 유효성 검사 강화
-    // 0,0 근처의 잘못된 좌표 필터링
-    if (x < 10 || x > displayWidth - 10) {
-      return; // 화면 밖이거나 잘못된 좌표
-    }
-    if (noteY < 10 || noteY > displayHeight - 10) {
-      return; // 화면 밖이거나 잘못된 좌표
-    }
+  if (!hasMeasureLayout) {
+    return;
+  }
 
-    // 음표 위에 운지 번호 표시 (기본적으로 위에만 표시)
-    if (opts.showAbove) {
-      const yAbove = noteY - opts.offsetY;
-      if (yAbove >= 0 && yAbove <= displayHeight) {
-        drawFingeringNumber(ctx, fingering, yAbove, opts);
-      }
-    }
+  const measureLabels = buildMeasureLabels(
+    analysis,
+    displayWidth,
+    displayHeight,
+    opts.offsetBelowMeasure
+  );
 
-    // 음표 아래에 운지 번호 표시 (위에 표시하지 않을 때만)
-    if (opts.showBelow && !opts.showAbove) {
-      const yBelow = noteY + opts.offsetY;
-      if (yBelow >= 0 && yBelow <= displayHeight) {
-        drawFingeringNumber(ctx, fingering, yBelow, opts);
-      }
-    }
-  });
+  for (const ml of measureLabels) {
+    if (ml.renderY < 0 || ml.renderY > displayHeight + 100) continue;
+    if (ml.renderX < -100 || ml.renderX > displayWidth + 100) continue;
+    drawMeasureLabel(ctx, ml, opts);
+  }
 }
 
 /**

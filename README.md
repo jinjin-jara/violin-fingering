@@ -67,6 +67,7 @@ violin-fingering/
 ### 프레임워크: Next.js 15
 
 **선정 이유:**
+
 - ✅ **정적 사이트 생성(SSG)**: GitHub Pages 배포에 최적화
 - ✅ **PWA 지원**: Service Worker 통합 용이
 - ✅ **TypeScript 네이티브 지원**: 타입 안정성
@@ -74,11 +75,13 @@ violin-fingering/
 - ✅ **SEO 친화적**: 서버 사이드 렌더링 지원
 
 **장점:**
+
 - 빠른 개발 환경 설정
 - 자동 코드 스플리팅
 - API 라우트 지원 (필요시)
 
 **단점:**
+
 - 정적 export 시 일부 기능 제한 (API 라우트 불가)
 
 ### 스타일링: Tailwind CSS 4
@@ -92,15 +95,18 @@ violin-fingering/
 현재는 기본 구조만 구현되어 있으며, 실제 악보 인식을 위해서는 다음 중 하나를 선택해야 합니다:
 
 1. **OpenSheetMusicDisplay (OSMD)**
+
    - MusicXML 파일 지원
    - 브라우저에서 렌더링 및 파싱 가능
    - 오프라인 동작 가능
 
 2. **VexFlow**
+
    - JavaScript 기반 악보 렌더링
    - 악보 생성에 특화
 
 3. **ML 모델 (TensorFlow.js)**
+
    - 이미지에서 직접 음표 인식
    - 오프라인 동작 가능
    - 높은 정확도 필요
@@ -129,7 +135,7 @@ getActualNote("F", { key: "A", mode: "major" })
 
 ```typescript
 // 음표를 바이올린 지판 위치로 변환
-calculateFingering(note, keyInfo)
+calculateFingering(note, keyInfo);
 // → {
 //     string: "A",
 //     finger: 2,
@@ -139,6 +145,7 @@ calculateFingering(note, keyInfo)
 ```
 
 **계산 과정:**
+
 1. 음표의 절대 반음 수 계산 (옥타브 포함)
 2. 각 현(E/A/D/G)에서 연주 가능 여부 확인
 3. 포지션별 손가락 위치 계산
@@ -207,7 +214,7 @@ jobs:
       - uses: actions/checkout@v3
       - uses: actions/setup-node@v3
         with:
-          node-version: '20'
+          node-version: "20"
       - run: npm install
       - run: npm run build
       - uses: peaceiris/actions-gh-pages@v3
@@ -243,15 +250,18 @@ jobs:
 ## 📝 향후 개선 사항
 
 1. **악보 인식 정확도 향상**
+
    - ML 모델 통합
    - 음표 위치 좌표 정확도 개선
 
 2. **사용자 경험 개선**
+
    - 운지 수동 수정 기능
    - 여러 포지션 옵션 제공
    - 악보 편집 기능
 
 3. **성능 최적화**
+
    - Web Worker를 통한 백그라운드 처리
    - 대용량 파일 처리 최적화
 

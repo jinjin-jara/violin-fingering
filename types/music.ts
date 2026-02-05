@@ -3,12 +3,37 @@
  */
 
 // 음표 이름 (계이름)
-export type NoteName = "C" | "C#" | "D" | "D#" | "E" | "F" | "F#" | "G" | "G#" | "A" | "A#" | "B";
+export type NoteName =
+  | "C"
+  | "C#"
+  | "D"
+  | "D#"
+  | "E"
+  | "F"
+  | "F#"
+  | "G"
+  | "G#"
+  | "A"
+  | "A#"
+  | "B";
 
 // 조성 (Key)
-export type KeySignature = 
-  | "C" | "G" | "D" | "A" | "E" | "B" | "F#" | "C#" // 샤프 계열
-  | "F" | "Bb" | "Eb" | "Ab" | "Db" | "Gb" | "Cb"; // 플랫 계열
+export type KeySignature =
+  | "C"
+  | "G"
+  | "D"
+  | "A"
+  | "E"
+  | "B"
+  | "F#"
+  | "C#" // 샤프 계열
+  | "F"
+  | "Bb"
+  | "Eb"
+  | "Ab"
+  | "Db"
+  | "Gb"
+  | "Cb"; // 플랫 계열
 
 // 조성 모드 (장조/단조)
 export type KeyMode = "major" | "minor";
@@ -26,9 +51,72 @@ export type FingerNumber = 0 | 1 | 2 | 3 | 4;
 export interface Note {
   name: NoteName; // 실제 연주되는 음 (조성 반영)
   octave: number; // 옥타브
-  x: number; // 악보상 x 좌표
-  y: number; // 악보상 y 좌표
+  x: number; // 악보상 x 좌표 (원본 이미지/페이지 픽셀 기준)
+  y: number; // 악보상 y 좌표 (원본 이미지/페이지 픽셀 기준)
   duration?: number; // 음표 길이 (4분음표 = 1, 8분음표 = 0.5 등)
+  /** NoteLayout id와 매칭 (있을 경우) */
+  layoutId?: string;
+}
+
+/**
+ * 페이지 기준 절대 좌표로 표현된 음표 레이아웃.
+ * Audiveris/MusicXML 분석 결과를 원본 악보 이미지 좌표계로 변환한 값.
+ * Canvas 오버레이에 그대로 사용 가능.
+ */
+export interface NoteLayout {
+  id: string;
+  pitch: string;
+  pageX: number;
+  pageY: number;
+  width: number;
+  height: number;
+  staffIndex: number;
+  voiceIndex?: number;
+  /** 원본 Note와 연결 (duration 등) */
+  duration?: number;
+  /** 소속 마디 인덱스 (0-based). 마디 밑 배치 시 사용 */
+  measureIndex?: number;
+}
+
+/**
+ * 페이지 레이아웃 메타정보 (tenths 단위).
+ * 이미지 크기가 정해지면 tenths → 픽셀 변환에 사용.
+ */
+export interface PageLayoutInfo {
+  pageWidthTenths: number;
+  pageHeightTenths: number;
+  /** tenths per millimeter (e.g. 40 tenths = 7mm → ~5.71) */
+  tenthsPerMm: number;
+}
+
+/**
+ * 마디(measure)의 페이지 기준 bounding box (tenths 단위).
+ * Page → System → Measure 구조에서 추출. note.y / staff.y 미사용.
+ */
+export interface MeasureLayout {
+  measureIndex: number;
+  /** 페이지 기준 좌상단 x (tenths) */
+  pageX: number;
+  /** 페이지 기준 좌상단 y (tenths) */
+  pageY: number;
+  /** 마디 너비 (tenths) */
+  width: number;
+  /** 마디 높이 (tenths) */
+  height: number;
+}
+
+/**
+ * 마디 단위 운지 라벨. 배치는 measure bounding box 기준만 사용.
+ * renderX = measure center, renderY = measure bottom + offset.
+ */
+export interface MeasureLabel {
+  measureIndex: number;
+  /** 해당 마디 운지 숫자 문자열 (예: "2 0 3 2") */
+  label: string;
+  /** 그리기 x (픽셀). measure center */
+  renderX: number;
+  /** 그리기 y (픽셀). measure bottom + offset */
+  renderY: number;
 }
 
 // 운지 정보
@@ -56,4 +144,12 @@ export interface ScoreAnalysis {
     numerator: number;
     denominator: number;
   };
+  /** 페이지 기준 절대 좌표 음표 레이아웃 (Canvas 오버레이용). 있으면 notes.x/y는 이와 동기화됨 */
+  noteLayouts?: NoteLayout[];
+  /** tenths → 픽셀 변환용. 클라이언트에서 이미지 크기로 스케일 시 사용 */
+  pageLayout?: PageLayoutInfo;
+  /** 마디별 페이지 기준 bbox (tenths). 운지 배치는 이 값만 사용 */
+  measureLayouts?: MeasureLayout[];
+  /** 마디별 라벨 (renderX/Y는 픽셀, 스케일 적용 후 사용) */
+  measureLabels?: MeasureLabel[];
 }

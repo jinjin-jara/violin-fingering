@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "postinstall": "cp node_modules/pdfjs-dist/build/pdf.worker.min.mjs public/pdf.worker.min.mjs || true",
-    "dev": "next dev",
+    "dev": "next dev -p 3500",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

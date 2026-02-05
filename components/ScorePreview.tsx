@@ -24,7 +24,10 @@ export default function ScorePreview({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [isRendering, setIsRendering] = useState(false);
-  const [displaySize, setDisplaySize] = useState<{ width: number; height: number } | null>(null);
+  const [displaySize, setDisplaySize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!canvasRef.current || !originalImage) return;
@@ -38,21 +41,17 @@ export default function ScorePreview({
       const handleImageReady = (img: HTMLImageElement) => {
         try {
           const scale = 2; // 고해상도 렌더링
-          
+
           // 렌더링 유틸리티 사용
           renderScoreWithFingerings(img, analysis, canvas, {
             scale,
             fontSize: 20,
-            offsetY: 25, // 음표 위 거리
-            offsetX: 10, // X 좌표 보정 (음표 머리 중심으로 이동)
-            offsetYBase: -50, // Y 좌표 기본 보정 (위로 이동하여 음표에 맞춤)
             circleRadius: 16,
-            textColor: "#1f2937", // 진한 회색 (가독성 향상)
+            textColor: "#1f2937",
             backgroundColor: "#ffffff",
             borderColor: "#1f2937",
             borderWidth: 2,
-            showAbove: true, // 위에만 표시 (중복 방지)
-            showBelow: false, // 아래는 표시 안 함
+            offsetBelowMeasure: 30,
           });
 
           // CSS로 표시할 크기 설정 (고해상도 Canvas를 원본 크기로 표시)
@@ -88,7 +87,8 @@ export default function ScorePreview({
     // 새로 로드해야 하는 경우 (string인 경우만)
     if (typeof originalImage === "string") {
       const img = new Image();
-      const isBlobOrDataUrl = originalImage.startsWith("blob:") || originalImage.startsWith("data:");
+      const isBlobOrDataUrl =
+        originalImage.startsWith("blob:") || originalImage.startsWith("data:");
       if (!isBlobOrDataUrl) {
         img.crossOrigin = "anonymous";
       }
@@ -96,21 +96,17 @@ export default function ScorePreview({
       img.onload = () => {
         try {
           const scale = 2; // 고해상도 렌더링
-          
+
           // 렌더링 유틸리티 사용
           renderScoreWithFingerings(img, analysis, canvas, {
             scale,
             fontSize: 20,
-            offsetY: 25, // 음표 위 거리
-            offsetX: 10, // X 좌표 보정 (음표 머리 중심으로 이동)
-            offsetYBase: -50, // Y 좌표 기본 보정 (위로 이동하여 음표에 맞춤)
             circleRadius: 16,
-            textColor: "#1f2937", // 진한 회색 (가독성 향상)
+            textColor: "#1f2937",
             backgroundColor: "#ffffff",
             borderColor: "#1f2937",
             borderWidth: 2,
-            showAbove: true, // 위에만 표시 (중복 방지)
-            showBelow: false, // 아래는 표시 안 함
+            offsetBelowMeasure: 30,
           });
 
           // CSS로 표시할 크기 설정 (고해상도 Canvas를 원본 크기로 표시)
@@ -167,14 +163,13 @@ export default function ScorePreview({
         <h2 className="text-xl font-bold mb-2">분석 결과</h2>
         <div className="text-sm text-gray-600">
           <p>
-            조성: <span className="font-semibold">{analysis.keyInfo.key} {analysis.keyInfo.mode}</span>
+            조성:{" "}
+            <span className="font-semibold">
+              {analysis.keyInfo.key} {analysis.keyInfo.mode}
+            </span>
           </p>
-          <p>
-            음표 수: {analysis.notes.length}개
-          </p>
-          <p>
-            운지 계산 완료: {analysis.fingerings.length}개
-          </p>
+          <p>음표 수: {analysis.notes.length}개</p>
+          <p>운지 계산 완료: {analysis.fingerings.length}개</p>
         </div>
       </div>
 

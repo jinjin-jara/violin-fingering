@@ -1,0 +1,15 @@
+feat(omr): Audiveris 페이지 좌표 기반 운지 오버레이 (measure bbox, note.y 미사용)
+
+- Audiveris/MusicXML 결과를 페이지 절대 좌표(tenths)로 계산
+  - 새 모듈 audiverisNoteLayout: Page/System/Measure 계층, system-layout/staff-layout만 사용
+  - measure bbox: note min/max 미사용 → measure.pageY = system.pageY(누적), measure.height = system.staffHeightTenths
+  - top-system-distance를 이전 시스템 하단으로부터의 delta로 해석, systemIndex별 누적 Y
+  - <print new-system="yes"/>로 시스템 경계 추출
+  - note.pageX = measure.pageX + defaultX (마디 내 x 누적)
+- 타입: NoteLayout(measureIndex), MeasureLayout(pageX,pageY,width,height), MeasureLabel, PageLayoutInfo 추가
+- API: extractNoteLayoutsFromMusicXML, measureLayouts 반환, 이미지 크기로 tenths→픽셀 동기화
+- noteCoordinateExtractor: layout 기반 좌표 파이프라인, syncNotesFromNoteLayouts, getImageDimensions
+- scoreRenderer: 마디별 라벨만 사용(buildMeasureLabels/drawMeasureLabel), note.y/staff.y 미사용, 사각형 배경+텍스트
+- FINGERING_OVERLAY_IMPLEMENTATION.md: measure 기준 배치, bbox 정의(음표 미사용), 누적 Y 규칙 문서화
+
+검증: 첫 마디 숫자가 제목 영역에 나오지 않음, system 하단 동일 baseline, scale/DPI 변환 일관
