@@ -154,10 +154,10 @@ export function buildNoteFingeringLabels(
         ? layout.x + (typeof layout.width === "number" ? layout.width / 2 : 0)
         : 0;
 
-    const systemBottom = systemBottomTenths[systemIndex] ?? 0;
+    const systemTop = systemTopTenths[systemIndex] ?? 0;
 
     const renderX = noteXtenths * scaleX;
-    const renderY = systemBottom * scaleY - opts.offsetAboveMeasure;
+    const renderY = systemTop * scaleY - opts.offsetAboveMeasure;
 
     const digit = opts.fingerTransform(f.finger);
     labels.push({
