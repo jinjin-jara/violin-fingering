@@ -126,7 +126,7 @@ function extractPageLayout(scorePartwise: any): {
         staffDistancesTenths.push(parseFloat(String(dist)) || 0);
     }
   }
-  if (staffDistancesTenths.length === 1) staffDistancesTenths.push(0);
+  // 단일 스태프 악기(바이올린 등): staffDistancesTenths = [0] 그대로 유지 (staffCount = 1)
 
   return {
     pageWidthTenths,
@@ -150,51 +150,90 @@ function getSystemStaffHeightTenths(staffDistancesTenths: number[]): number {
   return staffCount * STAFF_HEIGHT_TENTHS + sumDistances;
 }
 
+interface MeasureSystemData {
+  measureToSystem: number[];
+  /** 첫 시스템: topMargin 이후 실제 거리 (Audiveris <print><system-layout><top-system-distance>). null이면 global default 사용 */
+  firstSystemTopDistance: number | null;
+  /** 시스템 인덱스별 실제 system-distance (이전 시스템 bottom ~ 현 시스템 top). 없으면 global default */
+  systemDistances: Map<number, number>;
+}
+
 /**
- * part 0의 measure 목록에서 <print new-system="yes"/> 또는 new-page로 시스템 경계 추출.
- * 반환: measureIndex -> systemIndex (0-based).
+ * part 0의 measure 목록에서 시스템 경계 및 실제 Y 위치 정보를 추출.
+ * - <print new-system="yes"/> / new-page 로 시스템 경계 감지
+ * - <print><system-layout> 에서 top-system-distance / system-distance 읽기
  */
-function getMeasureToSystemIndex(measureList: any[]): number[] {
+function getMeasureSystemData(measureList: any[]): MeasureSystemData {
   const measureToSystem: number[] = [];
   let systemIndex = 0;
+  let firstSystemTopDistance: number | null = null;
+  const systemDistances = new Map<number, number>();
+
   for (let i = 0; i < measureList.length; i++) {
     const measure = measureList[i];
-    if (i > 0) {
-      const print = measure.print ?? measure["print"];
-      const prints = print == null ? [] : Array.isArray(print) ? print : [print];
-      for (const p of prints) {
+    const print = measure.print ?? measure["print"];
+    const prints = print == null ? [] : Array.isArray(print) ? print : [print];
+
+    for (const p of prints) {
+      const sysLayout = p["system-layout"] ?? p.systemLayout;
+
+      if (i === 0 && sysLayout) {
+        // 첫 마디: top-system-distance (topMargin 이후 첫 시스템까지의 거리)
+        const tsd = sysLayout["top-system-distance"] ?? sysLayout.topSystemDistance;
+        if (tsd != null) {
+          const v = parseFloat(String(tsd));
+          if (!isNaN(v) && v > 0) firstSystemTopDistance = v;
+        }
+      }
+
+      if (i > 0) {
         const newSystem =
           p["@_new-system"] ?? p["new-system"] ?? p["@_newSystem"] ?? p.newSystem;
         const newPage =
           p["@_new-page"] ?? p["new-page"] ?? p["@_newPage"] ?? p.newPage;
         if (newSystem === "yes" || newSystem === true || newPage === "yes" || newPage === true) {
           systemIndex++;
+          if (sysLayout) {
+            // system-distance: 이전 시스템 하단 ~ 현 시스템 상단 거리
+            const sd = sysLayout["system-distance"] ?? sysLayout.systemDistance;
+            if (sd != null) {
+              const v = parseFloat(String(sd));
+              if (!isNaN(v) && v > 0) systemDistances.set(systemIndex, v);
+            }
+          }
           break;
         }
       }
     }
+
     measureToSystem.push(systemIndex);
   }
-  return measureToSystem;
+
+  return { measureToSystem, firstSystemTopDistance, systemDistances };
 }
 
 /**
  * systemIndex별 누적 Y 계산.
- * top-system-distance = 이전 시스템 하단으로부터의 delta (첫 시스템은 pageTopMargin + 이 delta가 첫 시스템 상단).
+ * - firstSystemTopDistance: <print><system-layout><top-system-distance> (없으면 global default)
+ * - systemDistances: 시스템별 <system-distance> (없으면 global default)
  */
 function buildSystemPageYs(
   systemCount: number,
   staffHeightTenths: number,
-  systemDistanceTenths: number,
+  globalSystemDistanceTenths: number,
   pageTopMarginTenths: number,
-  topSystemDistanceTenths: number
+  globalTopSystemDistanceTenths: number,
+  firstSystemTopDistance: number | null,
+  systemDistances: Map<number, number>
 ): number[] {
   const pageYs: number[] = [];
-  let currentSystemY = pageTopMarginTenths + topSystemDistanceTenths;
+  const topDist = firstSystemTopDistance ?? globalTopSystemDistanceTenths;
+  let currentSystemY = pageTopMarginTenths + topDist;
   for (let s = 0; s < systemCount; s++) {
     pageYs.push(currentSystemY);
     currentSystemY += staffHeightTenths;
-    currentSystemY += systemDistanceTenths;
+    const sysDist = systemDistances.get(s + 1) ?? globalSystemDistanceTenths;
+    currentSystemY += sysDist;
   }
   return pageYs;
 }
@@ -204,13 +243,13 @@ function pitchToName(pitch: any): string {
   const step = (pitch.step ?? pitch["step"] ?? "C") as string;
   const alter = pitch.alter != null ? parseInt(String(pitch.alter), 10) : 0;
   const names: Record<string, string[]> = {
-    C: ["C", "C#", "D"],
-    D: ["D", "D#", "E"],
-    E: ["E", "F", "F#"],
-    F: ["F", "F#", "G"],
-    G: ["G", "G#", "A"],
-    A: ["A", "A#", "B"],
-    B: ["B", "C", "C#"],
+    C: ["Cb", "C", "C#"],
+    D: ["Db", "D", "D#"],
+    E: ["Eb", "E", "E#"],
+    F: ["Fb", "F", "F#"],
+    G: ["Gb", "G", "G#"],
+    A: ["Ab", "A", "A#"],
+    B: ["Bb", "B", "B#"],
   };
   const base = names[step] ?? ["C", "C#", "D"];
   const index = Math.max(0, Math.min(2, alter + 1));
@@ -309,7 +348,11 @@ export function computeNoteLayoutsFromMusicXML(
     : [firstPartMeasures];
   const numMeasures = measureList.length;
 
-  const measureToSystemIndex = getMeasureToSystemIndex(measureList);
+  const {
+    measureToSystem: measureToSystemIndex,
+    firstSystemTopDistance,
+    systemDistances,
+  } = getMeasureSystemData(measureList);
   const systemCount =
     measureToSystemIndex.length > 0
       ? Math.max(...measureToSystemIndex) + 1
@@ -319,7 +362,9 @@ export function computeNoteLayoutsFromMusicXML(
     systemStaffHeightTenths,
     systemDistanceTenths,
     topMarginTenths,
-    topSystemDistanceTenths
+    topSystemDistanceTenths,
+    firstSystemTopDistance,
+    systemDistances
   );
 
   const measuresPerSystem = new Map<number, number>();
@@ -403,8 +448,9 @@ export function computeNoteLayoutsFromMusicXML(
         const staffTopFromSystem = staffDistancesTenths
           .slice(0, staffIndex + 1)
           .reduce((a, b) => a + b, 0);
-        const pageYTenths =
-          topSystemDistanceTenths + staffTopFromSystem + yTenths;
+        // MusicXML default-y: 스태프 상단선 기준, 위=양수. 페이지 Y축은 아래=양수이므로 부호 반전.
+        const systemPageY = meas != null ? meas.pageY : (topMarginTenths + topSystemDistanceTenths);
+        const pageYTenths = systemPageY + staffTopFromSystem - yTenths;
 
         const id = `note-${partIdx}-${noteIndex}`;
         noteIndex++;

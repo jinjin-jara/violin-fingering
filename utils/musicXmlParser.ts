@@ -6,6 +6,7 @@
 
 import { XMLParser } from "fast-xml-parser";
 import { Note, KeyInfo, KeySignature } from "@/types/music";
+import { normalizeNoteName } from "./keyDetection";
 
 export interface ParsedMusicXML {
   success: boolean;
@@ -27,18 +28,18 @@ function pitchToNoteName(pitch: any): string {
   const alter = pitch.alter ? parseInt(pitch.alter) : 0;
 
   const noteNames: Record<string, string[]> = {
-    C: ["C", "C#", "D"],
-    D: ["D", "D#", "E"],
-    E: ["E", "F", "F#"],
-    F: ["F", "F#", "G"],
-    G: ["G", "G#", "A"],
-    A: ["A", "A#", "B"],
-    B: ["B", "C", "C#"],
+    C: ["Cb", "C", "C#"],
+    D: ["Db", "D", "D#"],
+    E: ["Eb", "E", "E#"],
+    F: ["Fb", "F", "F#"],
+    G: ["Gb", "G", "G#"],
+    A: ["Ab", "A", "A#"],
+    B: ["Bb", "B", "B#"],
   };
 
-  const baseNotes = noteNames[step] || ["C", "C#", "D"];
+  const baseNotes = noteNames[step] || ["Cb", "C", "C#"];
   const index = Math.max(0, Math.min(2, alter + 1));
-  return baseNotes[index];
+  return normalizeNoteName(baseNotes[index]);
 }
 
 /**

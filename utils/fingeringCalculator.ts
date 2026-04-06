@@ -60,26 +60,19 @@ function getOpenStringSemitones(string: ViolinString): number {
  * (오프셋은 개방현 대비 반음 수)
  *
  * E/A/D:
- *  0:0
- *  1:1 (low1)   2:1 (high1)
- *  3:2 (low2)   4:2 (high2)
- *  5:3 (3)
- *  6:4 (low4)   7:4 (high4)
+ *  0:0(open)  1:1  2:1  3:2  4:3  5:3  6:4  7:4
+ *  (오프셋 4 = C#/Db = 3번 손가락)
  *
  * G:
- *  0:0
- *  1:1 (low1)   2:1 (high1)
- *  3:2 (low2)   4:2 (high2)
- *  5:3 (low3)   6:3 (high3)
- *  7:4 (4)
+ *  0:0  1:1  2:1  3:2  4:2  5:3  6:3  7:4
  */
 const FIRST_POSITION_FINGERING_MAP: Record<
   ViolinString,
   Record<number, FingerNumber>
 > = {
-  E: { 0: 0, 1: 1, 2: 1, 3: 2, 4: 2, 5: 3, 6: 4, 7: 4 },
-  A: { 0: 0, 1: 1, 2: 1, 3: 2, 4: 2, 5: 3, 6: 4, 7: 4 },
-  D: { 0: 0, 1: 1, 2: 1, 3: 2, 4: 2, 5: 3, 6: 4, 7: 4 },
+  E: { 0: 0, 1: 1, 2: 1, 3: 2, 4: 3, 5: 3, 6: 4, 7: 4 },
+  A: { 0: 0, 1: 1, 2: 1, 3: 2, 4: 3, 5: 3, 6: 4, 7: 4 },
+  D: { 0: 0, 1: 1, 2: 1, 3: 2, 4: 3, 5: 3, 6: 4, 7: 4 },
   G: { 0: 0, 1: 1, 2: 1, 3: 2, 4: 2, 5: 3, 6: 3, 7: 4 },
 };
 
@@ -137,7 +130,14 @@ export function calculateFingering(
 
   if (candidates.length === 0) return null;
 
-  // 이미 G→D→A→E 순으로 넣었으니 첫 후보가 기본 최적
+  // 손가락 번호가 가장 낮은 현 선택 (가장 자연스러운 포지션)
+  // 동점이면 높은 현(E→A→D→G) 우선 — 개방현(finger 0)은 항상 최우선
+  const stringOrder: Record<ViolinString, number> = { E: 0, A: 1, D: 2, G: 3 };
+  candidates.sort((a, b) =>
+    a.finger !== b.finger
+      ? a.finger - b.finger
+      : stringOrder[a.string] - stringOrder[b.string]
+  );
   const best = candidates[0];
 
   return {

@@ -51,7 +51,7 @@ export default function ScorePreview({
             backgroundColor: "#ffffff",
             borderColor: "#1f2937",
             borderWidth: 2,
-            offsetBelowMeasure: 30,
+            offsetAboveMeasure: 15,
           });
 
           // CSS로 표시할 크기 설정 (고해상도 Canvas를 원본 크기로 표시)
@@ -106,7 +106,7 @@ export default function ScorePreview({
             backgroundColor: "#ffffff",
             borderColor: "#1f2937",
             borderWidth: 2,
-            offsetBelowMeasure: 30,
+            offsetAboveMeasure: 15,
           });
 
           // CSS로 표시할 크기 설정 (고해상도 Canvas를 원본 크기로 표시)

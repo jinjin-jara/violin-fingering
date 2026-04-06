@@ -1,34 +1,37 @@
 /**
  * 악보 렌더링 유틸리티
  *
- * 운지 숫자는 **measure bounding box 기준**으로만 배치합니다.
- * note.y / staff.y / system 상대 좌표는 사용하지 않습니다.
+ * ✅ 요구사항 반영:
+ * - 운지 숫자는 "노트별"로 배치한다 (x = noteLayout 기준)
+ * - y는 "시스템(한 줄)" 단위로 고정한다 (같은 줄은 항상 같은 y)
  */
 
-import {
-  ScoreAnalysis,
-  MeasureLayout,
-  MeasureLabel,
-  Fingering,
-} from "@/types/music";
+import { ScoreAnalysis, Fingering } from "@/types/music";
 
 export interface RenderOptions {
-  /** 고해상도 렌더링을 위한 스케일 (기본: 2) */
   scale?: number;
-  /** 운지 라벨 폰트 크기 (기본: 24) */
   fontSize?: number;
-  /** 숫자 배경 원의 반지름 (기본: 18) */
   circleRadius?: number;
-  /** 숫자 색상 (기본: #1f2937) */
   textColor?: string;
-  /** 배경 원 색상 (기본: #ffffff) */
   backgroundColor?: string;
-  /** 배경 원 테두리 색상 (기본: #1f2937) */
   borderColor?: string;
-  /** 배경 원 테두리 두께 (기본: 2) */
   borderWidth?: number;
-  /** 마디 bbox 하단에서 라벨까지의 고정 오프셋 픽셀 (기본: 30) */
-  offsetBelowMeasure?: number;
+
+  /** 시스템 상단에서 운지까지의 오프셋 px (위로 띄우는 거리, 양수 = 위) */
+  offsetAboveMeasure?: number;
+
+  /**
+   * 시스템을 나누기 위한 measure.pageY 클러스터링 임계값(tenths)
+   * 악보/해상도에 따라 달라질 수 있어 기본값 제공
+   */
+  systemClusterThresholdTenths?: number;
+
+  /**
+   * 손가락 숫자 변환.
+   * 기존 코드가 (finger>0 ? finger-1 : 0) 이었는데,
+   * 여기서 커스터마이즈 가능하도록 옵션화.
+   */
+  fingerTransform?: (finger: number) => number;
 }
 
 const DEFAULT_OPTIONS: Required<RenderOptions> = {
@@ -39,94 +42,183 @@ const DEFAULT_OPTIONS: Required<RenderOptions> = {
   backgroundColor: "#ffffff",
   borderColor: "#1f2937",
   borderWidth: 2,
-  offsetBelowMeasure: 30,
+  offsetAboveMeasure: 15,
+  systemClusterThresholdTenths: 80,
+  fingerTransform: (finger) => finger,
+};
+
+type NoteFingeringLabel = {
+  measureIndex: number;
+  systemIndex: number;
+  renderX: number;
+  renderY: number;
+  label: string; // single digit typically
 };
 
 /**
- * analysis에서 MeasureLabel[] 생성.
- * - fingerings를 noteLayout.measureIndex로 마디별 그룹화
- * - x = measure bbox 중앙 (pageX + width/2), y = measure bbox 하단 (pageY + height) + offset
- * - note.y / staff.y / 상대 좌표 미사용
+ * measureLayouts를 system(한 줄) 단위로 묶고,
+ * 각 system의 "하단 y"를 계산한다.
  */
-export function buildMeasureLabels(
+function computeSystemBounds(
+  analysis: ScoreAnalysis,
+  thresholdTenths: number
+): {
+  measureToSystem: Map<number, number>;
+  systemTopTenths: number[];
+  systemBottomTenths: number[];
+} {
+  const { measureLayouts } = analysis;
+  const sorted = [...(measureLayouts ?? [])].sort((a, b) => a.pageY - b.pageY);
+
+  const measureToSystem = new Map<number, number>();
+  const systemTopTenths: number[] = [];
+  const systemBottomTenths: number[] = [];
+
+  let currentSystem = -1;
+  let currentRefY = Number.NEGATIVE_INFINITY;
+
+  for (const m of sorted) {
+    if (
+      currentSystem === -1 ||
+      Math.abs(m.pageY - currentRefY) > thresholdTenths
+    ) {
+      currentSystem += 1;
+      currentRefY = m.pageY;
+      systemTopTenths[currentSystem] = m.pageY;
+      systemBottomTenths[currentSystem] = m.pageY + m.height;
+    } else {
+      systemTopTenths[currentSystem] = Math.min(
+        systemTopTenths[currentSystem],
+        m.pageY
+      );
+      systemBottomTenths[currentSystem] = Math.max(
+        systemBottomTenths[currentSystem],
+        m.pageY + m.height
+      );
+    }
+
+    measureToSystem.set(m.measureIndex, currentSystem);
+  }
+
+  return { measureToSystem, systemTopTenths, systemBottomTenths };
+}
+
+/**
+ * ✅ 핵심: 노트별 운지 라벨을 만든다.
+ * - x: noteLayout.pageX (tenths) 기반
+ * - y: systemTop - offsetAboveMeasure (px) — 마디 상단에서 위로 배치
+ */
+export function buildNoteFingeringLabels(
   analysis: ScoreAnalysis,
   displayWidth: number,
   displayHeight: number,
-  offsetBelowMeasurePx: number
-): MeasureLabel[] {
-  const { measureLayouts, pageLayout, fingerings, noteLayouts } = analysis;
+  opts: Required<RenderOptions>
+): NoteFingeringLabel[] {
+  const { pageLayout, fingerings, noteLayouts, measureLayouts } = analysis;
   if (
-    !measureLayouts?.length ||
     !pageLayout ||
     !fingerings?.length ||
-    !noteLayouts?.length
+    !noteLayouts?.length ||
+    !measureLayouts?.length
   )
     return [];
 
   const scaleX = displayWidth / pageLayout.pageWidthTenths;
   const scaleY = displayHeight / pageLayout.pageHeightTenths;
 
-  const byMeasure = new Map<number, Fingering[]>();
-  for (const f of fingerings) {
-    const layout = f.note.layoutId
-      ? noteLayouts.find((l) => l.id === f.note.layoutId)
-      : null;
-    const measureIndex = layout?.measureIndex ?? 0;
-    if (!byMeasure.has(measureIndex)) byMeasure.set(measureIndex, []);
-    byMeasure.get(measureIndex)!.push(f);
-  }
+  const { measureToSystem, systemTopTenths, systemBottomTenths } = computeSystemBounds(
+    analysis,
+    opts.systemClusterThresholdTenths
+  );
 
-  const labels: MeasureLabel[] = [];
-  for (const meas of measureLayouts) {
-    const list = byMeasure.get(meas.measureIndex) ?? [];
-    const digits = list.map((f) => (f.finger > 0 ? f.finger - 1 : 0));
-    const label = digits.join(" ");
-    const renderX = (meas.pageX + meas.width / 2) * scaleX;
-    const renderY = (meas.pageY + meas.height) * scaleY + offsetBelowMeasurePx;
+  // noteLayouts를 빠르게 찾기 위한 map
+  const noteLayoutById = new Map(noteLayouts.map((l: any) => [l.id, l]));
+
+  const labels: NoteFingeringLabel[] = [];
+
+  for (const f of fingerings as Fingering[]) {
+    const layout: any = f.note.layoutId
+      ? noteLayoutById.get(f.note.layoutId)
+      : null;
+    if (!layout) continue;
+
+    const measureIndex: number = layout.measureIndex ?? 0;
+    const systemIndex = measureToSystem.get(measureIndex) ?? 0;
+
+    // x 좌표는 노트 중심이 가장 자연스럽다.
+    const noteXtenths: number =
+      typeof layout.pageX === "number"
+        ? layout.pageX +
+          (typeof layout.width === "number" ? layout.width / 2 : 0)
+        : typeof layout.x === "number"
+        ? layout.x + (typeof layout.width === "number" ? layout.width / 2 : 0)
+        : 0;
+
+    const systemBottom = systemBottomTenths[systemIndex] ?? 0;
+
+    const renderX = noteXtenths * scaleX;
+    const renderY = systemBottom * scaleY - opts.offsetAboveMeasure;
+
+    const digit = opts.fingerTransform(f.finger);
     labels.push({
-      measureIndex: meas.measureIndex,
-      label,
+      measureIndex,
+      systemIndex,
       renderX,
       renderY,
+      label: String(digit),
     });
   }
+
+  // 같은 시스템 내에서는 x 오름차순으로 그려야 자연스럽다
+  labels.sort((a, b) =>
+    a.systemIndex !== b.systemIndex
+      ? a.systemIndex - b.systemIndex
+      : a.renderX - b.renderX
+  );
+
   return labels;
 }
 
-/**
- * 마디 라벨 한 개 그리기 (measure bbox 기준 좌표만 사용)
- */
-function drawMeasureLabel(
+function drawFingeringCircle(
   ctx: CanvasRenderingContext2D,
-  label: MeasureLabel,
+  x: number,
+  y: number,
+  text: string,
   options: Required<RenderOptions>
 ): void {
-  const { fontSize, textColor, backgroundColor, borderColor, borderWidth } =
-    options;
-  if (!label.label.trim()) return;
+  const {
+    fontSize,
+    circleRadius,
+    textColor,
+    backgroundColor,
+    borderColor,
+    borderWidth,
+  } = options;
 
+  ctx.save();
   ctx.font = `bold ${fontSize}px Arial, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  const metrics = ctx.measureText(label.label);
-  const padding = 8;
-  const w = metrics.width + padding * 2;
-  const h = fontSize + padding;
-  const x = label.renderX - w / 2;
-  const y = label.renderY - h / 2;
+
+  // circle
+  ctx.beginPath();
+  ctx.arc(x, y, circleRadius, 0, Math.PI * 2);
+  ctx.closePath();
 
   ctx.fillStyle = backgroundColor;
-  ctx.strokeStyle = borderColor;
+  ctx.fill();
+
   ctx.lineWidth = borderWidth;
-  ctx.strokeRect(x, y, w, h);
-  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = borderColor;
+  ctx.stroke();
+
   ctx.fillStyle = textColor;
-  ctx.fillText(label.label, label.renderX, label.renderY);
+  ctx.fillText(text, x, y);
+  ctx.restore();
 }
 
 /**
- * 원본 이미지에 운지 숫자를 오버레이하여 Canvas에 렌더링.
- * 배치는 measure bounding box만 사용 (note.y / staff.y / 상대 좌표 미사용).
+ * ✅ 진입점: 이미지 그린 후 "노트별 운지"를 시스템 하단에 고정해서 찍는다.
  */
 export function renderScoreWithFingerings(
   image: HTMLImageElement | HTMLCanvasElement,
@@ -136,129 +228,31 @@ export function renderScoreWithFingerings(
 ): void {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    throw new Error("Canvas context를 가져올 수 없습니다.");
-  }
+  if (!ctx) throw new Error("Canvas context를 가져올 수 없습니다.");
 
   const displayWidth = image.width;
   const displayHeight = image.height;
-  const canvasWidth = displayWidth * opts.scale;
-  const canvasHeight = displayHeight * opts.scale;
 
-  canvas.width = canvasWidth;
-  canvas.height = canvasHeight;
-  ctx.scale(opts.scale, opts.scale);
+  canvas.width = displayWidth * opts.scale;
+  canvas.height = displayHeight * opts.scale;
 
-  if (image instanceof HTMLImageElement || image instanceof HTMLCanvasElement) {
-    ctx.drawImage(image, 0, 0, displayWidth, displayHeight);
-  }
+  ctx.setTransform(opts.scale, 0, 0, opts.scale, 0, 0); // scale 리셋+적용
 
-  const hasMeasureLayout =
-    analysis.measureLayouts?.length &&
-    analysis.pageLayout &&
-    analysis.noteLayouts?.length;
+  ctx.drawImage(image, 0, 0, displayWidth, displayHeight);
 
-  if (!hasMeasureLayout) {
-    return;
-  }
-
-  const measureLabels = buildMeasureLabels(
+  // 노트별 라벨 생성
+  const labels = buildNoteFingeringLabels(
     analysis,
     displayWidth,
     displayHeight,
-    opts.offsetBelowMeasure
+    opts
   );
 
-  for (const ml of measureLabels) {
-    if (ml.renderY < 0 || ml.renderY > displayHeight + 100) continue;
-    if (ml.renderX < -100 || ml.renderX > displayWidth + 100) continue;
-    drawMeasureLabel(ctx, ml, opts);
+  for (const l of labels) {
+    // 안전 범위 체크
+    if (l.renderY < -200 || l.renderY > displayHeight + 200) continue;
+    if (l.renderX < -200 || l.renderX > displayWidth + 200) continue;
+
+    drawFingeringCircle(ctx, l.renderX, l.renderY, l.label, opts);
   }
-}
-
-/**
- * Canvas를 PNG 이미지로 변환
- */
-export function canvasToPNG(
-  canvas: HTMLCanvasElement,
-  quality: number = 1.0
-): string {
-  return canvas.toDataURL("image/png", quality);
-}
-
-/**
- * Canvas를 JPG 이미지로 변환
- */
-export function canvasToJPG(
-  canvas: HTMLCanvasElement,
-  quality: number = 0.95
-): string {
-  return canvas.toDataURL("image/jpeg", quality);
-}
-
-/**
- * Canvas를 Blob으로 변환 (다운로드용)
- */
-export async function canvasToBlob(
-  canvas: HTMLCanvasElement,
-  mimeType: string = "image/png",
-  quality: number = 1.0
-): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (blob) {
-          resolve(blob);
-        } else {
-          reject(new Error("Blob 변환 실패"));
-        }
-      },
-      mimeType,
-      quality
-    );
-  });
-}
-
-/**
- * Canvas를 PDF로 변환 (jsPDF 사용)
- */
-export async function canvasToPDF(
-  canvas: HTMLCanvasElement,
-  filename: string = `violin-fingering-${Date.now()}.pdf`
-): Promise<void> {
-  const { default: jsPDF } = await import("jspdf");
-
-  // PDF 크기 계산 (mm 단위)
-  const width = canvas.width;
-  const height = canvas.height;
-  const pdfWidth = (width * 0.264583).toFixed(2); // px to mm
-  const pdfHeight = (height * 0.264583).toFixed(2);
-
-  const pdf = new jsPDF({
-    orientation: width > height ? "landscape" : "portrait",
-    unit: "mm",
-    format: [parseFloat(pdfWidth), parseFloat(pdfHeight)],
-  });
-
-  // 고해상도 이미지 데이터
-  const imgData = canvas.toDataURL("image/png", 1.0);
-  pdf.addImage(
-    imgData,
-    "PNG",
-    0,
-    0,
-    parseFloat(pdfWidth),
-    parseFloat(pdfHeight)
-  );
-  pdf.save(filename);
-}
-
-/**
- * 이미지 파일을 다운로드
- */
-export function downloadImage(dataUrl: string, filename: string): void {
-  const link = document.createElement("a");
-  link.download = filename;
-  link.href = dataUrl;
-  link.click();
 }
